@@ -35,15 +35,15 @@ class GameView(ctx: Context) : View(ctx) {
     private var last = System.nanoTime()
 
     private var bL = false; private var bR = false; private var bU = false; private var bD = false; private var bJ = false
-    private val btns = Array(5) { RectF() }
-    private val labels = arrayOf("<", ">", "^", "v", "JUMP")
+    private var dcx = 0f; private var dcy = 0f; private var dsz = 0f
+    private var jcx = 0f; private var jcy = 0f; private var jr = 0f
 
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
         ghost = null
-        val top = h * 0.75f; val bot = h * 0.98f; val m = w * 0.01f
-        val xs = floatArrayOf(0.01f, 0.17f, 0.35f, 0.51f, 0.70f)
-        val xe = floatArrayOf(0.16f, 0.32f, 0.50f, 0.66f, 0.99f)
-        for (i in 0..4) btns[i].set(xs[i] * w + m, top, xe[i] * w - m, bot)
+        val top = h * 0.75f; val bot = h * 0.99f
+        dsz = min((bot - top) * 0.98f, w * 0.52f)
+        dcx = w * 0.03f + dsz / 2f; dcy = (top + bot) / 2f
+        jr = dsz * 0.36f; jcx = w - w * 0.06f - jr; jcy = dcy
     }
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
@@ -54,11 +54,11 @@ class GameView(ctx: Context) : View(ctx) {
             if (lifting) break
             if (e.actionMasked == MotionEvent.ACTION_POINTER_UP && i == e.actionIndex) continue
             val x = e.getX(i); val y = e.getY(i)
-            if (btns[0].contains(x, y)) bL = true
-            if (btns[1].contains(x, y)) bR = true
-            if (btns[2].contains(x, y)) bU = true
-            if (btns[3].contains(x, y)) bD = true
-            if (btns[4].contains(x, y)) bJ = true
+            val dx = x - dcx; val dy = y - dcy; val dd = hypot(dx, dy)
+            if (dd < dsz * 0.62f && dd > dsz * 0.07f) {
+                if (abs(dx) > abs(dy)) { if (dx < 0) bL = true else bR = true } else { if (dy < 0) bU = true else bD = true }
+            }
+            if (hypot(x - jcx, y - jcy) < jr * 1.25f) bJ = true
         }
         return true
     }
@@ -228,16 +228,50 @@ class GameView(ctx: Context) : View(ctx) {
         paint.isFakeBoldText = false
         c.restore()
 
-        val pressed = booleanArrayOf(bL, bR, bU, bD, bJ)
-        paint.textAlign = Paint.Align.CENTER; paint.textSize = height * 0.04f
-        for (i in 0..4) {
-            paint.style = Paint.Style.FILL
-            paint.color = if (i == 4) (if (pressed[i]) Color.rgb(130, 30, 30) else Color.rgb(176, 52, 48))
-                          else (if (pressed[i]) Color.rgb(25, 28, 40) else Color.rgb(58, 62, 82))
-            c.drawRoundRect(btns[i], 28f, 28f, paint)
-            paint.color = Color.rgb(222, 214, 190)
-            c.drawText(labels[i], btns[i].centerX(), btns[i].centerY() + paint.textSize / 3f, paint)
-        }
+        drawControls(c)
         postInvalidateOnAnimation()
+    }
+
+    private fun arrow(c: Canvas, x: Float, y: Float, dx: Int, dy: Int, sz: Float) {
+        val path = Path()
+        if (dx != 0) { path.moveTo(x + dx * sz, y); path.lineTo(x - dx * sz * 0.6f, y - sz); path.lineTo(x - dx * sz * 0.6f, y + sz) }
+        else { path.moveTo(x, y + dy * sz); path.lineTo(x - sz, y - dy * sz * 0.6f); path.lineTo(x + sz, y - dy * sz * 0.6f) }
+        path.close(); c.drawPath(path, paint)
+    }
+
+    private fun drawControls(c: Canvas) {
+        val t = dsz / 3f; val h = dsz / 2f
+        paint.style = Paint.Style.FILL
+        // drop shadows
+        paint.color = Color.argb(60, 0, 0, 0)
+        c.drawRoundRect(dcx - h + 6, dcy - t / 2 + 8, dcx + h + 6, dcy + t / 2 + 8, 16f, 16f, paint)
+        c.drawRoundRect(dcx - t / 2 + 6, dcy - h + 8, dcx + t / 2 + 6, dcy + h + 8, 16f, 16f, paint)
+        c.drawCircle(jcx + 6, jcy + 8, jr, paint)
+        // D-pad cross
+        val dark = Color.rgb(52, 56, 74); val press = Color.rgb(22, 24, 34)
+        paint.color = dark
+        c.drawRoundRect(dcx - h, dcy - t / 2, dcx + h, dcy + t / 2, 16f, 16f, paint)
+        c.drawRoundRect(dcx - t / 2, dcy - h, dcx + t / 2, dcy + h, 16f, 16f, paint)
+        paint.color = press
+        if (bL) c.drawRoundRect(dcx - h, dcy - t / 2, dcx - t / 2 + 4, dcy + t / 2, 16f, 16f, paint)
+        if (bR) c.drawRoundRect(dcx + t / 2 - 4, dcy - t / 2, dcx + h, dcy + t / 2, 16f, 16f, paint)
+        if (bU) c.drawRoundRect(dcx - t / 2, dcy - h, dcx + t / 2, dcy - t / 2 + 4, 16f, 16f, paint)
+        if (bD) c.drawRoundRect(dcx - t / 2, dcy + t / 2 - 4, dcx + t / 2, dcy + h, 16f, 16f, paint)
+        paint.color = Color.rgb(70, 75, 98); c.drawCircle(dcx, dcy, t * 0.28f, paint) // center dimple
+        paint.color = Color.rgb(222, 214, 190)
+        val a = t * 0.2f; val o = h - t * 0.38f
+        arrow(c, dcx - o, dcy, -1, 0, a); arrow(c, dcx + o, dcy, 1, 0, a)
+        arrow(c, dcx, dcy - o, 0, -1, a); arrow(c, dcx, dcy + o, 0, 1, a)
+        // round action button
+        paint.color = if (bJ) Color.rgb(120, 28, 28) else Color.rgb(184, 54, 50)
+        c.drawCircle(jcx, jcy, jr, paint)
+        paint.style = Paint.Style.STROKE; paint.strokeWidth = 8f
+        paint.color = if (bJ) Color.rgb(90, 20, 20) else Color.rgb(140, 36, 34)
+        c.drawCircle(jcx, jcy, jr - 4f, paint)
+        paint.style = Paint.Style.FILL
+        if (!bJ) { paint.color = Color.argb(70, 255, 255, 255); c.drawCircle(jcx - jr * 0.3f, jcy - jr * 0.3f, jr * 0.25f, paint) }
+        paint.color = Color.rgb(222, 214, 190); paint.textAlign = Paint.Align.CENTER
+        paint.typeface = Typeface.DEFAULT_BOLD; paint.textSize = jr * 0.36f
+        c.drawText("JUMP", jcx, jcy + jr * 0.13f, paint)
     }
 }
