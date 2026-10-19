@@ -39,6 +39,7 @@ class GameView(ctx: Context) : View(ctx) {
     private val labels = arrayOf("<", ">", "^", "v", "JUMP")
 
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
+        ghost = null
         val top = h * 0.75f; val bot = h * 0.98f; val m = w * 0.01f
         val xs = floatArrayOf(0.01f, 0.17f, 0.35f, 0.51f, 0.70f)
         val xe = floatArrayOf(0.16f, 0.32f, 0.50f, 0.66f, 0.99f)
@@ -121,51 +122,120 @@ class GameView(ctx: Context) : View(ctx) {
         if (p == 4 && !climbing && px > 205f) { score += 500; level++; resetRound() }
     }
 
+    // ---- LCD look ----
+    private val LCD = Color.rgb(184, 192, 164)
+    private val INK = Color.rgb(28, 30, 26)
+    private val inkP = Paint().apply { color = INK; isAntiAlias = false }
+    private val shadowP = Paint().apply { color = INK; alpha = 40; isAntiAlias = false }
+    private val ghostP = Paint().apply { color = INK; alpha = 20; isAntiAlias = false }
+    private var ghost: Bitmap? = null
+
+    private val P0 = arrayOf("...####...", "..######..", "..#.##.#..", "..######..", "...####...", "..######..",
+        ".########.", ".#.####.#.", "...#..#...", "...#..#...", "..##..##..", "..##..##..")
+    private val P1 = P0.copyOf().also { it[8] = "..#....#.."; it[9] = ".##....##."; it[10] = ".##....##."; it[11] = ".##....##." }
+    private val PC = P0.copyOf().also { it[5] = "#.######.#"; it[6] = "#.######.#"; it[7] = "..######.." }
+    private val PC1 = PC.copyOf().also { it[8] = P1[8]; it[9] = P1[9]; it[10] = P1[10]; it[11] = P1[11] }
+    private val BA = arrayOf(".######.", "########", "##.##.##", "########", "########", "##.##.##", "########", ".######.")
+    private val BB = arrayOf(".######.", "########", "#.####.#", "########", "########", "#.####.#", "########", ".######.")
+    private val BOSS = arrayOf("......#..#......", "......#..#......", "..############..", "..############..",
+        "..##..####..##..", "..##..####..##..", "..############..", "..#.#.#..#.#.#..", "..############..",
+        "#.############.#", "#.############.#", "#..##......##..#", "...##......##...", "...##......##...")
+    private val ORB = arrayOf("...#...", "..###..", ".#####.", ".#####.", "#######", "..###..")
+
+    private fun spr(c: Canvas, rows: Array<String>, cx: Float, bot: Float, u: Float, p: Paint) {
+        val x0 = cx - rows[0].length * u / 2f; val y0 = bot - rows.size * u
+        for (r in rows.indices) for (i in rows[r].indices)
+            if (rows[r][i] == '#') c.drawRect(x0 + i * u, y0 + r * u, x0 + (i + 1) * u, y0 + (r + 1) * u, p)
+    }
+    private fun lit(c: Canvas, rows: Array<String>, cx: Float, bot: Float, u: Float) {
+        spr(c, rows, cx + 0.8f, bot + 0.8f, u, shadowP); spr(c, rows, cx, bot, u, inkP)
+    }
+    private fun snap(x: Float) = (x / 8f).roundToInt() * 8f
+
+    private fun buildGhost(ox: Float, oy: Float, s: Float): Bitmap {
+        val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val g = Canvas(bmp); g.translate(ox, oy); g.scale(s, s)
+        for (pl in 0..4) {
+            var x = 8f
+            while (x < W) {
+                spr(g, BA, x, platY(pl, x) - 2.5f, 1.2f, ghostP)
+                spr(g, P0, x + 8f, platY(pl, x + 8f) - 2.5f, 1.3f, ghostP)
+                x += 16f
+            }
+        }
+        return bmp
+    }
+
     override fun onDraw(c: Canvas) {
         val now = System.nanoTime()
         val dt = min(0.033f, (now - last) / 1e9f); last = now
         update(dt)
 
-        c.drawColor(Color.rgb(15, 15, 35))
-        val s = min(width / W, height * 0.72f / H)
-        c.save(); c.translate((width - W * s) / 2f, 0f); c.scale(s, s)
+        c.drawColor(Color.rgb(222, 214, 190)) // plastic case
+        val sl = 10f; val st = 10f; val sr = width - 10f; val sb = height * 0.73f
+        val s = min((sr - sl) / W, (sb - st) / H)
+        val ox = sl + ((sr - sl) - W * s) / 2f; val oy = st + ((sb - st) - H * s) / 2f
+        paint.style = Paint.Style.FILL; paint.color = LCD
+        c.drawRoundRect(sl, st, sr, sb, 14f, 14f, paint)
+        paint.style = Paint.Style.STROKE; paint.strokeWidth = 6f; paint.color = Color.rgb(120, 118, 105)
+        c.drawRoundRect(sl, st, sr, sb, 14f, 14f, paint)
+        if (ghost == null) ghost = buildGhost(ox, oy, s)
+        c.drawBitmap(ghost!!, 0f, 0f, null)
 
-        paint.style = Paint.Style.STROKE; paint.strokeWidth = 1.5f; paint.color = Color.rgb(120, 200, 255)
+        c.save(); c.translate(ox, oy); c.scale(s, s)
+        paint.color = INK; paint.style = Paint.Style.STROKE
         for (k in 0..3) {
-            var y = platY(k + 1, lx[k]); val yb = platY(k, lx[k])
+            var y = platY(k + 1, lx[k]) ; val yb = platY(k, lx[k])
+            paint.strokeWidth = 1.3f
             c.drawLine(lx[k] - 4, y, lx[k] - 4, yb, paint); c.drawLine(lx[k] + 4, y, lx[k] + 4, yb, paint)
             while (y < yb) { c.drawLine(lx[k] - 4, y, lx[k] + 4, y, paint); y += 5f }
         }
-        paint.strokeWidth = 5f; paint.color = Color.rgb(220, 80, 60)
-        for (i in 0..4) c.drawLine(0f, platY(i, 0f), W, platY(i, W), paint)
-
-        paint.style = Paint.Style.FILL
-        paint.color = Color.rgb(140, 90, 50); c.drawRect(15f, platY(4, 25f) - 26f, 39f, platY(4, 25f) - 3f, paint) // boss
-        paint.color = Color.WHITE; c.drawRect(21f, platY(4, 25f) - 20f, 25f, platY(4, 25f) - 15f, paint); c.drawRect(30f, platY(4, 25f) - 20f, 34f, platY(4, 25f) - 15f, paint)
-        paint.color = Color.rgb(255, 210, 60); c.drawCircle(215f, platY(4, 215f) - 10f, 6f, paint) // goal
-        paint.color = Color.rgb(255, 160, 40)
-        for (b in barrels) c.drawCircle(b.x, platY(b.p, b.x) - 5f, 5f, paint)
-
-        val py = if (climbing) cy else platY(p, px) - jumpH
-        paint.color = if (pauseT > 0f) Color.GRAY else Color.rgb(90, 220, 120)
-        c.drawRect(px - 5f, py - 14f, px + 5f, py, paint)
-        paint.color = Color.WHITE; c.drawRect(px - 3f, py - 12f, px + 3f, py - 8f, paint)
-
-        paint.color = Color.WHITE; paint.textSize = 12f; paint.textAlign = Paint.Align.LEFT
-        c.drawText("SCORE $score   LIVES $lives   LVL ${level + 1}", 6f, 14f, paint)
-        if (gameOver) {
-            paint.textAlign = Paint.Align.CENTER; paint.textSize = 24f
-            c.drawText("GAME OVER", W / 2, 150f, paint)
-            paint.textSize = 12f; c.drawText("tap to restart", W / 2, 170f, paint)
+        for (i in 0..4) {
+            paint.strokeWidth = 3f; c.drawLine(0f, platY(i, 0f), W, platY(i, W), paint)
+            paint.strokeWidth = 1f
+            var x = 3f
+            while (x < W) { c.drawLine(x, platY(i, x), x + 3f, platY(i, x) + 4f, paint); x += 6f }
         }
+        paint.style = Paint.Style.FILL
+
+        val bump = if (spawnT > 1.6f) -1.5f else 0f
+        lit(c, BOSS, 27f, platY(4, 27f) - 2.5f + bump, 1.2f)
+        lit(c, ORB, 215f, platY(4, 215f) - 2.5f, 1.5f)
+        for (b in barrels) {
+            val bx = snap(b.x)
+            lit(c, if (((b.x / 8f).toInt() % 2) == 0) BA else BB, bx, platY(b.p, bx) - 2.5f, 1.2f)
+        }
+
+        val blink = pauseT > 0f && ((now / 120_000_000L) % 2L == 0L)
+        if (!blink) {
+            val frame = if (climbing) (if (((cy / 6f).toInt() % 2) == 0) PC else PC1)
+                        else if (((px / 8f).toInt() % 2) == 0 || jumpH > 0f) P0 else P1
+            val sx = if (climbing) lx[climbK] else snap(px)
+            val sy = if (climbing) cy else platY(p, sx) - 2.5f - jumpH
+            lit(c, frame, sx, sy, 1.3f)
+        }
+
+        paint.color = INK; paint.typeface = Typeface.MONOSPACE; paint.isFakeBoldText = true
+        paint.textAlign = Paint.Align.LEFT; paint.textSize = 13f
+        c.drawText(String.format("%05d", score), 6f, 15f, paint)
+        for (i in 0 until lives) lit(c, P0, W - 10f - i * 11f, 22f, 0.8f)
+        paint.textAlign = Paint.Align.CENTER
+        if (pauseT > 0f) { paint.textSize = 16f; c.drawText("MISS", W / 2, 160f, paint) }
+        if (gameOver) {
+            paint.textSize = 22f; c.drawText("GAME OVER", W / 2, 150f, paint)
+            paint.textSize = 11f; c.drawText("TAP TO PLAY", W / 2, 170f, paint)
+        }
+        paint.isFakeBoldText = false
         c.restore()
 
         val pressed = booleanArrayOf(bL, bR, bU, bD, bJ)
         paint.textAlign = Paint.Align.CENTER; paint.textSize = height * 0.04f
         for (i in 0..4) {
-            paint.color = if (pressed[i]) Color.rgb(90, 110, 180) else Color.rgb(45, 50, 90)
-            c.drawRoundRect(btns[i], 20f, 20f, paint)
-            paint.color = Color.WHITE
+            paint.style = Paint.Style.FILL
+            paint.color = if (i == 4) (if (pressed[i]) Color.rgb(130, 30, 30) else Color.rgb(176, 52, 48))
+                          else (if (pressed[i]) Color.rgb(25, 28, 40) else Color.rgb(58, 62, 82))
+            c.drawRoundRect(btns[i], 28f, 28f, paint)
+            paint.color = Color.rgb(222, 214, 190)
             c.drawText(labels[i], btns[i].centerX(), btns[i].centerY() + paint.textSize / 3f, paint)
         }
         postInvalidateOnAnimation()
